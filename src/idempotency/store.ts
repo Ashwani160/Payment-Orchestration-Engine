@@ -23,3 +23,10 @@ export async function saveResult(
   // EX 300 → expire after 5 minutes, matching the roadmap's lock TTL.
   await redis.set(keyFor(idempotencyKey), JSON.stringify(result), "EX", 300);
 }
+// Store
+// Key:
+// idem:abc123
+// Value:
+// {"gatewayRef":"txn_111"}
+// Expire after:
+// 300 seconds
