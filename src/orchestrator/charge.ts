@@ -1,8 +1,7 @@
-import type { ChargeRequest } from "../domain/payment.js";
-import type { PaymentState } from "../domain/payment.js";
+import type { ChargeRequest, PaymentState } from "../domain/payment.js";
 import type { GatewayHealth } from "../domain/gateway.js";
 import { rankGateways } from "../routing/rankGateways.js";
-import { getResult, saveResult } from "../idempotency/store.js";
+import { getResult, saveResult, claim, release } from "../idempotency/store.js";
 import { callGateway } from "../gateways/gatewayClient.js";
 
 // Hardcoded health for the thin slice. Later this comes from Redis (health/ store).
@@ -13,39 +12,67 @@ const STATIC_HEALTH: readonly GatewayHealth[] = [
   { gatewayId: "gateway-c", successRate: 0.95, avgLatencyMs: 200 },
 ];
 
-// The charge workflow. Returns a PaymentState — success or failure as DATA.
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// A duplicate that LOST the claim waits here for the winner to finish.
+async function waitForResult(request: ChargeRequest): Promise<PaymentState> {
+  const key = request.idempotencyKey;
+  for (let i = 0; i < 50; i++) {            // up to ~5s
+    await sleep(100);
+    const r = await getResult(key);
+    if (r === null) {
+      // Winner released on failure → key is free. Report the in-flight failure.
+      return { status: "failed", request, reason: "concurrent charge failed; please retry" };
+    }
+    if (r !== "pending") {
+      return { status: "succeeded", request, gatewayId: "gateway-a", gatewayRef: r.gatewayRef };
+    }
+  }
+  return { status: "failed", request, reason: "timed out waiting for concurrent charge" };
+}
+
+
 export async function charge(request: ChargeRequest): Promise<PaymentState> {
-  // 1. Idempotency gate (NAIVE — has a deliberate race, fixed in the depth spike).
-  const existing = await getResult(request.idempotencyKey);
-  if (existing !== null) {
-    return {
-      status: "succeeded",
-      request,
-      gatewayId: "gateway-a", // cached path; gateway id isn't re-derived in the slice
-      gatewayRef: existing.gatewayRef,
-    };
+  const key = request.idempotencyKey;
+
+  // 1. Already completed? Replay the cached result, never re-charge.
+  const existing = await getResult(key);
+  if (existing !== null && existing !== "pending") {
+    return { status: "succeeded", request, gatewayId: "gateway-a", gatewayRef: existing.gatewayRef };
   }
 
-  // 2. Route (PURE). Best gateway first.
-  const ranked = rankGateways(STATIC_HEALTH);
-  const best = ranked[0];
-  if (best === undefined) {
-    return { status: "failed", request, reason: "no healthy gateway available" };
+  // 2. Atomic gate. Exactly one concurrent caller wins this.
+  const won = await claim(key);
+  if (!won) {
+    // Lost the race (or saw "pending") → wait for the winner instead of charging.
+    return await waitForResult(request);
   }
 
-  // 3. Execute. Thin slice calls only the first candidate (no failover yet).
-  const response = await callGateway(best, request);
+  // 3. We own the claim — we are the ONLY caller that will hit the gateway.
+  try {
+    const best = rankGateways(STATIC_HEALTH)[0];
+    if (best === undefined) {
+      await release(key);
+      return { status: "failed", request, reason: "no healthy gateway available" };
+    }
 
-  // 4. Interpret the outcome — compiler forces us to handle every case.
-  switch (response.outcome) {
-    case "success":
-      await saveResult(request.idempotencyKey, { gatewayRef: response.gatewayRef });
-      return { status: "succeeded", request, gatewayId: best, gatewayRef: response.gatewayRef };
-    case "declined":
-      return { status: "failed", request, reason: `declined: ${response.code}` };
-    case "timeout":
-      return { status: "failed", request, reason: "gateway timeout" };
-    case "error":
-      return { status: "failed", request, reason: response.message };
+    const response = await callGateway(best, request);
+    switch (response.outcome) {
+      case "success":
+        await saveResult(key, { gatewayRef: response.gatewayRef });
+        return { status: "succeeded", request, gatewayId: best, gatewayRef: response.gatewayRef };
+      case "declined":
+        await release(key);
+        return { status: "failed", request, reason: `declined: ${response.code}` };
+      case "timeout":
+        await release(key);
+        return { status: "failed", request, reason: "gateway timeout" };
+      case "error":
+        await release(key);
+        return { status: "failed", request, reason: response.message };
+    }
+  } catch (err) {
+    await release(key); // never leave a dangling lock
+    throw err;
   }
 }
