@@ -5,8 +5,8 @@ import type { ChargeRequest } from "../domain/payment.js";
 // mock gateway (Step 7); the map is here so failover has somewhere to grow.
 const GATEWAY_URLS: Record<GatewayId, string> = {
   "gateway-a": "http://localhost:4001/charge",
-  "gateway-b": "http://localhost:4001/charge",
-  "gateway-c": "http://localhost:4001/charge",
+  "gateway-b": "http://localhost:4002/charge",
+  "gateway-c": "http://localhost:4003/charge",
 };
 
 const TIMEOUT_MS = 3000;

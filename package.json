@@ -11,7 +11,8 @@
     "start": "node dist/index.js",
     "mock": "tsx watch mock-gateway/server.ts",
     "smoke": "tsx scripts/smoke.ts",
-    "concurrency": "tsx scripts/concurrency.ts"
+    "concurrency": "tsx scripts/concurrency.ts",
+    "failover": "tsx scripts/failover.ts"
   },
   "keywords": [],
   "author": "",

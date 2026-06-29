@@ -1,5 +1,5 @@
 import type { ChargeRequest, PaymentState } from "../domain/payment.js";
-import type { GatewayHealth } from "../domain/gateway.js";
+import type { GatewayHealth, GatewayId } from "../domain/gateway.js";
 import { rankGateways } from "../routing/rankGateways.js";
 import { getResult, saveResult, claim, release } from "../idempotency/store.js";
 import { callGateway } from "../gateways/gatewayClient.js";
@@ -31,6 +31,32 @@ async function waitForResult(request: ChargeRequest): Promise<PaymentState> {
   return { status: "failed", request, reason: "timed out waiting for concurrent charge" };
 }
 
+// Walk the ranked candidates. Returns the first success, or the last failure
+// reason if every candidate is exhausted. PURE-ish: all I/O is callGateway.
+async function attemptWithFailover(
+  ranked: readonly GatewayId[],
+  request: ChargeRequest,
+): Promise<{ gatewayId: GatewayId; gatewayRef: string } | { failed: true; reason: string }> {
+  let lastReason = "no candidates";
+
+  for (const gatewayId of ranked) {
+    const response = await callGateway(gatewayId, request);
+    switch (response.outcome) {
+      case "success":
+        return { gatewayId, gatewayRef: response.gatewayRef };
+      case "declined":
+        // TERMINAL — another gateway won't approve a declined card. Stop now.
+        return { failed: true, reason: `declined: ${response.code}` };
+      case "timeout":
+        lastReason = `timeout on ${gatewayId}`;
+        continue; // RETRYABLE — try the next candidate.
+      case "error":
+        lastReason = `error on ${gatewayId}: ${response.message}`;
+        continue; // RETRYABLE — try the next candidate.
+    }
+  }
+  return { failed: true, reason: `all gateways exhausted (${lastReason})` };
+}
 
 export async function charge(request: ChargeRequest): Promise<PaymentState> {
   const key = request.idempotencyKey;
@@ -50,27 +76,22 @@ export async function charge(request: ChargeRequest): Promise<PaymentState> {
 
   // 3. We own the claim — we are the ONLY caller that will hit the gateway.
   try {
-    const best = rankGateways(STATIC_HEALTH)[0];
-    if (best === undefined) {
+    const ranked = rankGateways(STATIC_HEALTH);
+    if (ranked.length === 0) {
       await release(key);
       return { status: "failed", request, reason: "no healthy gateway available" };
     }
 
-    const response = await callGateway(best, request);
-    switch (response.outcome) {
-      case "success":
-        await saveResult(key, { gatewayRef: response.gatewayRef });
-        return { status: "succeeded", request, gatewayId: best, gatewayRef: response.gatewayRef };
-      case "declined":
-        await release(key);
-        return { status: "failed", request, reason: `declined: ${response.code}` };
-      case "timeout":
-        await release(key);
-        return { status: "failed", request, reason: "gateway timeout" };
-      case "error":
-        await release(key);
-        return { status: "failed", request, reason: response.message };
+    const result = await attemptWithFailover(ranked, request);
+
+    if ("failed" in result) {
+      await release(key);
+      return { status: "failed", request, reason: result.reason };
     }
+
+    await saveResult(key, { gatewayRef: result.gatewayRef });
+    return { status: "succeeded", request, gatewayId: result.gatewayId, gatewayRef: result.gatewayRef };
+    
   } catch (err) {
     await release(key); // never leave a dangling lock
     throw err;
