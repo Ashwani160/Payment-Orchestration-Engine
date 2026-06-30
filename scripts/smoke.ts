@@ -1,9 +1,7 @@
-const ENGINE = "http://localhost:3000";
-const MOCK = "http://localhost:4001";
+import { ENGINE, A, B, C, resetAll, totalChargesAcross } from "./helpers.js";
 
 async function main() {
-  // Reset the gateway's counters.
-  await fetch(`${MOCK}/admin/reset`, { method: "POST" });
+  await resetAll();
 
   const key = `smoke-${Date.now()}`;
   const body = JSON.stringify({ amount: 1500, currency: "INR", customerId: "cust-1" });
@@ -19,15 +17,16 @@ async function main() {
   const secondJson = await second.json();
   console.log("second :", second.status, secondJson);
 
-  // 3. The gateway should have seen exactly ONE charge.
-  const stats = await (await fetch(`${MOCK}/admin/stats`)).json();
-  console.log("stats  :", stats);
+  // 3. Exactly ONE charge across ALL gateways — routing-agnostic. (Adaptive
+  //    routing may pick any gateway; we don't care which, only that it's once.)
+  const charges = await totalChargesAcross(A, B, C);
+  console.log("charges (all gateways):", charges);
 
   const ok =
     first.status === 200 &&
     second.status === 200 &&
     firstJson.gatewayRef === secondJson.gatewayRef &&
-    stats.totalCharges === 1;
+    charges === 1;
 
   console.log(ok ? "\n✅ SMOKE PASSED" : "\n❌ SMOKE FAILED");
   process.exit(ok ? 0 : 1);

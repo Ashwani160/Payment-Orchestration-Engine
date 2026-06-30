@@ -2,7 +2,11 @@ import { Router } from "express";
 import type { ChargeRequest } from "../domain/payment.js";
 import { charge } from "../orchestrator/charge.js";
 import { snapshotBreakers, resetBreakers } from "../resilience/breakerStore.js";
+import { readCounts, resetHealth } from "../health/healthStore.js";
+import { deriveHealth } from "../health/deriveHealth.js";
+import type { GatewayId } from "../domain/gateway.js";
 
+const GATEWAYS: readonly GatewayId[] = ["gateway-a", "gateway-b", "gateway-c"];
 export const routes: Router = Router();
 
 // Validate raw input into a typed ChargeRequest, or return what's wrong.
@@ -59,5 +63,17 @@ routes.get("/admin/breakers", (_req, res) => {
 
 routes.post("/admin/breakers/reset", (_req, res) => {
   resetBreakers();
+  res.json({ ok: true });
+});
+
+routes.get("/admin/health", async (_req, res) => {
+  const health = await Promise.all(
+    GATEWAYS.map(async (id) => deriveHealth(id, await readCounts(id))),
+  );
+  res.json(health);
+});
+
+routes.post("/admin/health/reset", async (_req, res) => {
+  await resetHealth(GATEWAYS);
   res.json({ ok: true });
 });

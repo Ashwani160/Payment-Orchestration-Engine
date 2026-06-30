@@ -5,16 +5,19 @@ import { getResult, saveResult, claim, release } from "../idempotency/store.js";
 import { callGateway } from "../gateways/gatewayClient.js";
 import { beforeAttempt, afterResult, defaultBreakerConfig } from "../resilience/circuitBreaker.js";
 import { getBreaker, setBreaker } from "../resilience/breakerStore.js";
+import { recordAttempt, readCounts } from "../health/healthStore.js";
+import { deriveHealth } from "../health/deriveHealth.js";
 
-// Hardcoded health for the thin slice. Later this comes from Redis (health/ store).
-// All three healthy so rankGateways has real data to sort.
-const STATIC_HEALTH: readonly GatewayHealth[] = [
-  { gatewayId: "gateway-a", successRate: 0.99, avgLatencyMs: 120 },
-  { gatewayId: "gateway-b", successRate: 0.97, avgLatencyMs: 90 },
-  { gatewayId: "gateway-c", successRate: 0.95, avgLatencyMs: 200 },
-];
+const ALL_GATEWAYS: readonly GatewayId[] = ["gateway-a", "gateway-b", "gateway-c"];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Read live counters for every gateway and derive the health snapshot.
+async function liveHealth(): Promise<readonly GatewayHealth[]> {
+  return Promise.all(
+    ALL_GATEWAYS.map(async (id) => deriveHealth(id, await readCounts(id))),
+  );
+}
 
 // A duplicate that LOST the claim waits here for the winner to finish.
 async function waitForResult(request: ChargeRequest): Promise<PaymentState> {
@@ -52,12 +55,17 @@ async function attemptWithFailover(
       continue; // fail fast — don't even try a gateway we know is down
     }
 
+    const startedAt = Date.now();
     const response = await callGateway(gatewayId, request);
+    const latencyMs = Date.now() - startedAt;
     
     // KEY DISTINCTION: a decline means the gateway WORKED (it just said no to the
     // card). Only timeout/error are gateway *faults*. So declines keep the breaker
     // healthy even though they're terminal for the customer.
     const healthy = response.outcome === "success" || response.outcome === "declined";
+    // Feed BOTH the breaker (in-memory) and the health store (Redis).
+    // A timeout is recorded at the client's timeout ceiling, not 0.
+    await recordAttempt(gatewayId, healthy, latencyMs);
     setBreaker(gatewayId, afterResult(decision.state, healthy, Date.now(), defaultBreakerConfig));
 
     switch (response.outcome) {
@@ -95,7 +103,7 @@ export async function charge(request: ChargeRequest): Promise<PaymentState> {
 
   // 3. We own the claim — we are the ONLY caller that will hit the gateway.
   try {
-    const ranked = rankGateways(STATIC_HEALTH);
+    const ranked = rankGateways(await liveHealth());
     if (ranked.length === 0) {
       await release(key);
       return { status: "failed", request, reason: "no healthy gateway available" };

@@ -13,7 +13,8 @@
     "smoke": "tsx scripts/smoke.ts",
     "concurrency": "tsx scripts/concurrency.ts",
     "failover": "tsx scripts/failover.ts",
-    "breaker": "tsx scripts/breaker.ts"
+    "breaker": "tsx scripts/breaker.ts",
+    "adaptive": "tsx scripts/adaptive.ts"
   },
   "keywords": [],
   "author": "",

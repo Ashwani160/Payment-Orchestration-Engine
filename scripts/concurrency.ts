@@ -1,10 +1,9 @@
-const ENGINE = "http://localhost:3000";
-const MOCK = "http://localhost:4001";
+import { ENGINE, A, B, C, resetAll, totalChargesAcross } from "./helpers.js";
+
 const N = 20; // identical concurrent requests
 
 async function main() {
-  // Fresh gateway counters.
-  await fetch(`${MOCK}/admin/reset`, { method: "POST" });
+  await resetAll();
 
   // ONE key, shared by every request. A correct system charges exactly once.
   const key = `conc-${Date.now()}`;
@@ -21,15 +20,16 @@ async function main() {
   // How many DISTINCT gatewayRefs came back? Each distinct ref = a separate charge.
   const distinctRefs = new Set(responses.map((r) => r.gatewayRef).filter(Boolean));
 
-  // The source of truth: how many charges the gateway actually executed.
-  const stats = await (await fetch(`${MOCK}/admin/stats`)).json();
+  // The source of truth: how many charges the gateways actually executed (summed
+  // across all three, since adaptive routing decides which one handles it).
+  const charges = await totalChargesAcross(A, B, C);
 
-  console.log(`fired           : ${N} identical concurrent requests`);
-  console.log(`distinct refs   : ${distinctRefs.size}`);
-  console.log(`gateway charges : ${stats.totalCharges}`);
+  console.log(`fired                 : ${N} identical concurrent requests`);
+  console.log(`distinct refs         : ${distinctRefs.size}`);
+  console.log(`charges (all gateways): ${charges}`);
 
-  const ok = stats.totalCharges === 1;
-  console.log(ok ? "\n✅ EXACTLY ONE CHARGE" : `\n❌ RACE PROVEN — ${stats.totalCharges} charges from one key`);
+  const ok = charges === 1 && distinctRefs.size === 1;
+  console.log(ok ? "\n✅ EXACTLY ONE CHARGE" : `\n❌ RACE PROVEN — ${charges} charges from one key`);
   process.exit(ok ? 0 : 1);
 }
 

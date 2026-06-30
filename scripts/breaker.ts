@@ -1,22 +1,21 @@
-const ENGINE = "http://localhost:3000";
-const A = "http://localhost:4001", B = "http://localhost:4002", C = "http://localhost:4003";
-const json = (r: Response) => r.json();
+import { ENGINE, A, B, C, resetAll, statsOf, post } from "./helpers.js";
+
+const CHARGES = 6;   // more than enough to trip, then prove fast-fail
+const THRESHOLD = 3; // matches defaultBreakerConfig.failureThreshold
 
 async function main() {
-  await Promise.all([A, B, C].map((g) => fetch(`${g}/admin/reset`, { method: "POST" })));
-  await fetch(`${ENGINE}/admin/breakers/reset`, { method: "POST" });
+  await resetAll();
 
-  // gateway-a faults on every call.
-  await fetch(`${A}/admin/behavior`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ behavior: "down" }),
-  });
+  // ALL gateways down. This is the honest way to test the breaker in isolation:
+  // with a healthy alternative present, adaptive routing would simply demote the
+  // faulting gateway, and the breaker would rarely be the thing that stops the
+  // traffic. With every gateway failing, the breaker is unambiguously what makes
+  // the engine STOP spending network calls after the threshold.
+  await Promise.all([A, B, C].map((g) => post(`${g}/admin/behavior`, { behavior: "down" })));
 
-  // Fire 8 charges SEQUENTIALLY with unique keys so the breaker accrues failures
-  // deterministically (concurrent would race the count — a noted tradeoff).
+  // Sequential, unique keys → each gateway accrues failures deterministically.
   const statuses: number[] = [];
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < CHARGES; i++) {
     const res = await fetch(`${ENGINE}/v1/charge`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": `brk-${Date.now()}-${i}` },
@@ -25,21 +24,23 @@ async function main() {
     statuses.push(res.status);
   }
 
-  const statsA = await json(await fetch(`${A}/admin/stats`));
-  const statsB = await json(await fetch(`${B}/admin/stats`));
-  const breakers = await json(await fetch(`${ENGINE}/admin/breakers`));
+  const [sa, sb, sc] = await Promise.all([statsOf(A), statsOf(B), statsOf(C)]);
+  const breakers = await (await fetch(`${ENGINE}/admin/breakers`)).json();
 
-  console.log("charge statuses :", statuses.join(" "));
-  console.log("A requests      :", statsA.totalRequests, "(should stop at the threshold)");
-  console.log("B charges       :", statsB.totalCharges);
-  console.log("breaker[a]      :", breakers["gateway-a"]);
+  console.log("charge statuses :", statuses.join(" "), "(all 422 — every gateway is down)");
+  console.log(`requests  A/B/C : ${sa.totalRequests}/${sb.totalRequests}/${sc.totalRequests} (each should plateau at ${THRESHOLD})`);
+  console.log("breakers        :", breakers);
 
-  const ok =
-    statuses.every((s) => s === 200) &&
-    statsA.totalRequests === 3 &&
-    statsB.totalCharges === 8 &&
-    breakers["gateway-a"]?.status === "open";
+  const allOpen = ["gateway-a", "gateway-b", "gateway-c"].every((g) => breakers[g]?.status === "open");
 
+  // The key proof: despite CHARGES (6) attempts, each gateway received only
+  // THRESHOLD (3) requests — after that the open breaker skipped it entirely.
+  const plateaued =
+    sa.totalRequests === THRESHOLD &&
+    sb.totalRequests === THRESHOLD &&
+    sc.totalRequests === THRESHOLD;
+
+  const ok = statuses.every((s) => s === 422) && plateaued && allOpen;
   console.log(ok ? "\n✅ CIRCUIT BREAKER WORKS" : "\n❌ BREAKER TEST FAILED");
   process.exit(ok ? 0 : 1);
 }
