@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { ChargeRequest } from "../domain/payment.js";
 import { charge } from "../orchestrator/charge.js";
+import { snapshotBreakers, resetBreakers } from "../resilience/breakerStore.js";
 
 export const routes: Router = Router();
 
@@ -50,4 +51,13 @@ routes.post("/v1/charge", async (req, res) => {
     }
   }
 
+});
+
+routes.get("/admin/breakers", (_req, res) => {
+  res.json(snapshotBreakers());
+});
+
+routes.post("/admin/breakers/reset", (_req, res) => {
+  resetBreakers();
+  res.json({ ok: true });
 });

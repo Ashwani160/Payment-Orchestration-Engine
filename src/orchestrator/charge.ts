@@ -3,6 +3,8 @@ import type { GatewayHealth, GatewayId } from "../domain/gateway.js";
 import { rankGateways } from "../routing/rankGateways.js";
 import { getResult, saveResult, claim, release } from "../idempotency/store.js";
 import { callGateway } from "../gateways/gatewayClient.js";
+import { beforeAttempt, afterResult, defaultBreakerConfig } from "../resilience/circuitBreaker.js";
+import { getBreaker, setBreaker } from "../resilience/breakerStore.js";
 
 // Hardcoded health for the thin slice. Later this comes from Redis (health/ store).
 // All three healthy so rankGateways has real data to sort.
@@ -40,7 +42,24 @@ async function attemptWithFailover(
   let lastReason = "no candidates";
 
   for (const gatewayId of ranked) {
+
+    // Ask the breaker before spending a network call on this gateway.
+    const decision = beforeAttempt(getBreaker(gatewayId), Date.now(), defaultBreakerConfig);
+    setBreaker(gatewayId, decision.state); // persist any open → half-open flip
+
+    if (!decision.allow) {
+      lastReason = `breaker open on ${gatewayId}`;
+      continue; // fail fast — don't even try a gateway we know is down
+    }
+
     const response = await callGateway(gatewayId, request);
+    
+    // KEY DISTINCTION: a decline means the gateway WORKED (it just said no to the
+    // card). Only timeout/error are gateway *faults*. So declines keep the breaker
+    // healthy even though they're terminal for the customer.
+    const healthy = response.outcome === "success" || response.outcome === "declined";
+    setBreaker(gatewayId, afterResult(decision.state, healthy, Date.now(), defaultBreakerConfig));
+
     switch (response.outcome) {
       case "success":
         return { gatewayId, gatewayRef: response.gatewayRef };
@@ -91,7 +110,7 @@ export async function charge(request: ChargeRequest): Promise<PaymentState> {
 
     await saveResult(key, { gatewayRef: result.gatewayRef });
     return { status: "succeeded", request, gatewayId: result.gatewayId, gatewayRef: result.gatewayRef };
-    
+
   } catch (err) {
     await release(key); // never leave a dangling lock
     throw err;

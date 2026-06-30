@@ -9,12 +9,14 @@ function makeGateway(name: string, port: number) {
   let latencyMs = 0;
   let failureRate = 0;
   let totalCharges = 0;
+  let totalRequests = 0;
   const chargesByCustomer = new Map<string, number>();
 
   const app = express();
   app.use(express.json());
 
   app.post("/charge", async (req, res) => {
+    totalRequests += 1;
     if (latencyMs > 0) await sleep(latencyMs);
 
     if (behavior === "down") {
@@ -46,10 +48,11 @@ function makeGateway(name: string, port: number) {
   });
 
   app.get("/admin/stats", (_req, res) => {
-    res.json({ name, totalCharges, chargesByCustomer: Object.fromEntries(chargesByCustomer) });
+    res.json({ name, totalRequests, totalCharges, chargesByCustomer: Object.fromEntries(chargesByCustomer) });
   });
 
   app.post("/admin/reset", (_req, res) => {
+    totalRequests=0,
     totalCharges = 0;
     chargesByCustomer.clear();
     behavior = "success";
