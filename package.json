@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "type":"module",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx watch src/index.ts",
@@ -14,12 +14,15 @@
     "concurrency": "tsx scripts/concurrency.ts",
     "failover": "tsx scripts/failover.ts",
     "breaker": "tsx scripts/breaker.ts",
-    "adaptive": "tsx scripts/adaptive.ts"
+    "adaptive": "tsx scripts/adaptive.ts",
+    "effect-demo": "tsx scripts/effect-retry.ts",
+    "effect-gateway": "tsx scripts/effect-gateway.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "effect": "^3.21.4",
     "express": "^5.2.1",
     "ioredis": "^5.11.1"
   },
