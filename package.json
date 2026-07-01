@@ -16,7 +16,8 @@
     "breaker": "tsx scripts/breaker.ts",
     "adaptive": "tsx scripts/adaptive.ts",
     "effect-demo": "tsx scripts/effect-retry.ts",
-    "effect-gateway": "tsx scripts/effect-gateway.ts"
+    "effect-gateway": "tsx scripts/effect-gateway.ts",
+    "effect-failover": "tsx scripts/effect-failover.ts"
   },
   "keywords": [],
   "author": "",
