@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { chargeEffect } from "../src/gateways/gatewayEffect.js";
-import type { ChargeRequest } from "../src/domain/payment.js";
+import { chargeEffect } from "../packages/engine/src/gateways/gatewayEffect.js";
+import type { ChargeRequest } from "../packages/engine/src/domain/payment.js";
 
 const A = "http://localhost:4001";
 const post = (url: string, body?: unknown) =>

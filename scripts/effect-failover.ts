@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { failoverEffect } from "../src/orchestrator/failoverEffect.js";
-import type { ChargeRequest } from "../src/domain/payment.js";
-import { redis } from "../src/idempotency/redis.js";
+import { failoverEffect } from "../packages/engine/src/orchestrator/failoverEffect.js";
+import type { ChargeRequest } from "../packages/engine/src/domain/payment.js";
+import { redis } from "../packages/engine/src/idempotency/redis.js";
 
 const A = "http://localhost:4001", B = "http://localhost:4002", C = "http://localhost:4003";
 const ENGINE = "http://localhost:3000";

@@ -1,15 +1,12 @@
 {
-  "name": "payment-orchestration-engine",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "payment-orchestrator",
+  "version": "0.1.0",
+  "private": true,
   "type": "module",
+  "workspaces": ["packages/*"],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "mock": "tsx watch mock-gateway/server.ts",
+    "dev": "tsx watch packages/engine/src/index.ts",
+    "mock": "tsx watch packages/mock-gateways/src/server.ts",
     "smoke": "tsx scripts/smoke.ts",
     "concurrency": "tsx scripts/concurrency.ts",
     "failover": "tsx scripts/failover.ts",
@@ -17,20 +14,13 @@
     "adaptive": "tsx scripts/adaptive.ts",
     "effect-demo": "tsx scripts/effect-retry.ts",
     "effect-gateway": "tsx scripts/effect-gateway.ts",
-    "effect-failover": "tsx scripts/effect-failover.ts"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "effect": "^3.21.4",
-    "express": "^5.2.1",
-    "ioredis": "^5.11.1"
+    "effect-failover": "tsx scripts/effect-failover.ts",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/node": "^26.0.1",
-    "tsx": "^4.22.4",
-    "typescript": "^6.0.3"
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
   }
 }

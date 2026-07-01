@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { backoffSchedule } from "../src/resilience/backoff.js";
+import { backoffSchedule } from "../packages/engine/src/resilience/backoff.js";
 
 let attempts = 0;
 
